@@ -11,6 +11,12 @@ import { calculateTokenCost } from "@/lib/pricing";
 import { prisma } from "@/lib/prisma";
 import { createRunTrace, createStepObservation } from "@/lib/langfuse";
 import { createId, stringify } from "@/lib/utils";
+import type {
+  AgentModelPolicy,
+  AgentRuntimeKind,
+  ModelGatewayId,
+  ModelProviderId
+} from "@/lib/agent-runtime/interfaces";
 
 export type CampaignAgentDefinition = {
   name: string;
@@ -20,10 +26,12 @@ export type CampaignAgentDefinition = {
     | "template_strategist"
     | "send_time_optimizer"
     | "compliance_validator";
-  runtime: "llm_only" | "api_tools" | "human_assisted";
-  provider: "google";
-  model: "gemini-2.5-flash-lite" | "gemini-2.5-flash" | "gemini-2.5-pro";
+  runtime: Extract<AgentRuntimeKind, "llm_only" | "api_tools" | "human_assisted">;
+  gateway: ModelGatewayId;
+  provider: ModelProviderId;
+  model: string;
   promptVersion: string;
+  modelPolicy?: Pick<AgentModelPolicy, "fallbackModels" | "routingTags" | "budgetKey">;
   systemBrief: string;
 };
 
@@ -32,9 +40,14 @@ export const CAMPAIGN_AGENT_TEAM: CampaignAgentDefinition[] = [
     name: "Campaign Performance Analyst",
     role: "performance_analyst",
     runtime: "api_tools",
+    gateway: "litellm",
     provider: "google",
     model: "gemini-2.5-flash",
     promptVersion: "campaign-mvp-v1",
+    modelPolicy: {
+      routingTags: ["campaign", "analysis", "trusted-api-tools"],
+      budgetKey: "campaign-agent-fleet"
+    },
     systemBrief:
       "Analyze Wati campaign history and identify objective, cohort, reply, conversion, revenue, spend, and opt-out patterns."
   },
@@ -42,9 +55,15 @@ export const CAMPAIGN_AGENT_TEAM: CampaignAgentDefinition[] = [
     name: "Cohort Strategy Agent",
     role: "cohort_strategist",
     runtime: "llm_only",
+    gateway: "litellm",
     provider: "google",
     model: "gemini-2.5-flash-lite",
     promptVersion: "campaign-mvp-v1",
+    modelPolicy: {
+      fallbackModels: ["gemini-2.5-flash"],
+      routingTags: ["campaign", "cohort", "low-risk"],
+      budgetKey: "campaign-agent-fleet"
+    },
     systemBrief:
       "Recommend the next campaign cohort using recent intent, fatigue, revenue potential, and opt-out risk."
   },
@@ -52,9 +71,15 @@ export const CAMPAIGN_AGENT_TEAM: CampaignAgentDefinition[] = [
     name: "Template Strategy Agent",
     role: "template_strategist",
     runtime: "llm_only",
+    gateway: "litellm",
     provider: "google",
     model: "gemini-2.5-flash",
     promptVersion: "campaign-mvp-v1",
+    modelPolicy: {
+      fallbackModels: ["gemini-2.5-flash-lite"],
+      routingTags: ["campaign", "template", "customer-facing"],
+      budgetKey: "campaign-agent-fleet"
+    },
     systemBrief:
       "Draft a WhatsApp campaign template that is concise, personalized, compliant, and tied to the recommended cohort."
   },
@@ -62,9 +87,14 @@ export const CAMPAIGN_AGENT_TEAM: CampaignAgentDefinition[] = [
     name: "Send Time Optimizer",
     role: "send_time_optimizer",
     runtime: "api_tools",
+    gateway: "litellm",
     provider: "google",
     model: "gemini-2.5-flash-lite",
     promptVersion: "campaign-mvp-v1",
+    modelPolicy: {
+      routingTags: ["campaign", "send-time", "low-risk"],
+      budgetKey: "campaign-agent-fleet"
+    },
     systemBrief:
       "Choose the best send window from tenant region, prior reply curves, conversion timing, and fatigue controls."
   },
@@ -72,9 +102,15 @@ export const CAMPAIGN_AGENT_TEAM: CampaignAgentDefinition[] = [
     name: "Campaign Compliance Validator",
     role: "compliance_validator",
     runtime: "llm_only",
+    gateway: "litellm",
     provider: "google",
     model: "gemini-2.5-flash-lite",
     promptVersion: "campaign-mvp-v1",
+    modelPolicy: {
+      fallbackModels: ["gemini-2.5-flash"],
+      routingTags: ["campaign", "validator", "policy"],
+      budgetKey: "campaign-agent-fleet"
+    },
     systemBrief:
       "Validate the campaign plan for opt-out risk, template quality, audience fatigue, policy safety, and business readiness."
   }
@@ -405,9 +441,12 @@ async function executeAgentStep({
     },
     output,
     metadata: {
+      gateway: agent.gateway,
       model: agent.model,
       provider: agent.provider,
       promptVersion: agent.promptVersion,
+      routingTags: agent.modelPolicy?.routingTags,
+      budgetKey: agent.modelPolicy?.budgetKey,
       inputTokens: usage.inputTokens,
       outputTokens: usage.outputTokens,
       totalTokens: usage.totalTokens,
