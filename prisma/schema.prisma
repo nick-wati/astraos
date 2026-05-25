@@ -1,0 +1,478 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum SOPStatus {
+  draft
+  active
+  paused
+  archived
+}
+
+enum TeamStatus {
+  active
+  paused
+  error
+}
+
+enum AgentRuntimeType {
+  llm_only
+  api_tools
+  e2b_sandbox
+  human_assisted
+}
+
+enum AgentStatus {
+  healthy
+  warning
+  failed
+  inactive
+}
+
+enum FailureAction {
+  retry
+  escalate
+  stop
+  request_human_review
+}
+
+enum RunStatus {
+  queued
+  running
+  succeeded
+  failed
+  needs_human_review
+  escalated
+}
+
+enum StepRunStatus {
+  queued
+  running
+  validating
+  succeeded
+  failed
+  retrying
+  escalated
+  needs_human_review
+}
+
+enum ReviewStatus {
+  open
+  approved
+  rejected
+  resolved
+}
+
+enum AlertSeverity {
+  info
+  warning
+  critical
+}
+
+enum AlertType {
+  validation_failure
+  cost_anomaly
+  latency_anomaly
+  repeated_retry
+  human_review_needed
+  agent_failure
+}
+
+enum AlertStatus {
+  open
+  acknowledged
+  resolved
+}
+
+enum TenantStatus {
+  active
+  paused
+  churn_risk
+}
+
+enum TenantPlan {
+  starter
+  growth
+  enterprise
+}
+
+enum CampaignStatus {
+  draft
+  scheduled
+  sent
+  completed
+  failed
+}
+
+enum CampaignObjective {
+  revenue_recovery
+  product_launch
+  reactivation
+  retention
+  event_promotion
+  support_education
+}
+
+enum RecommendationStatus {
+  draft
+  recommended
+  approved
+  rejected
+  sent
+}
+
+enum CampaignRunStatus {
+  running
+  succeeded
+  needs_review
+  failed
+}
+
+enum CampaignAgentRole {
+  performance_analyst
+  cohort_strategist
+  template_strategist
+  send_time_optimizer
+  compliance_validator
+}
+
+enum CampaignAgentRuntime {
+  llm_only
+  api_tools
+  human_assisted
+}
+
+model BusinessSOP {
+  id                String            @id @default(cuid())
+  name              String
+  businessObjective String
+  description       String
+  status            SOPStatus         @default(draft)
+  owner             String
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  teams             AgentTeam[]
+  roleAgents        RoleAgent[]
+  validatorAgents   ValidatorAgent[]
+  steps             SOPStep[]
+  executionRuns     ExecutionRun[]
+  humanReviewItems  HumanReviewItem[]
+  alerts            Alert[]
+}
+
+model AgentTeam {
+  id              String           @id @default(cuid())
+  sopId           String
+  name            String
+  description     String
+  status          TeamStatus       @default(active)
+  successRate     Float            @default(0)
+  outcomeScore    Float            @default(0)
+  totalRuns       Int              @default(0)
+  totalCost       Float            @default(0)
+  totalTokens     Int              @default(0)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  sop             BusinessSOP      @relation(fields: [sopId], references: [id], onDelete: Cascade)
+  roleAgents      RoleAgent[]
+  validatorAgents ValidatorAgent[]
+  steps           SOPStep[]
+  executionRuns   ExecutionRun[]
+}
+
+model RoleAgent {
+  id               String             @id @default(cuid())
+  teamId           String
+  sopId            String
+  name             String
+  roleTitle        String
+  roleDescription  String
+  responsibilities String
+  inputs           String
+  outputs          String
+  decisionRights   String
+  toolsAllowed     String
+  runtimeType      AgentRuntimeType   @default(llm_only)
+  llmProvider      String             @default("mock")
+  model            String             @default("mock-command-1")
+  temperature      Float              @default(0.2)
+  maxTokens        Int                @default(1200)
+  status           AgentStatus        @default(healthy)
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+  team             AgentTeam          @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  sop              BusinessSOP        @relation(fields: [sopId], references: [id], onDelete: Cascade)
+  validators       ValidatorAgent[]   @relation("ValidatedAgent")
+  steps            SOPStep[]
+  stepRuns         StepRun[]
+  metrics          AgentMetric[]
+  reviewItems      HumanReviewItem[]
+  alerts           Alert[]
+}
+
+model ValidatorAgent {
+  id                 String          @id @default(cuid())
+  teamId             String
+  sopId              String
+  name               String
+  validatesAgentId   String
+  validationCriteria String
+  passThreshold      Float           @default(0.85)
+  failureAction      FailureAction   @default(retry)
+  maxRetries         Int             @default(2)
+  model              String          @default("mock-validator-1")
+  status             AgentStatus     @default(healthy)
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+  team               AgentTeam       @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  sop                BusinessSOP     @relation(fields: [sopId], references: [id], onDelete: Cascade)
+  validatesAgent     RoleAgent       @relation("ValidatedAgent", fields: [validatesAgentId], references: [id], onDelete: Cascade)
+  steps              SOPStep[]
+  stepRuns           StepRun[]
+}
+
+model SOPStep {
+  id                  String          @id @default(cuid())
+  sopId               String
+  teamId              String
+  order               Int
+  name                String
+  description         String
+  assignedRoleAgentId String
+  validatorAgentId    String
+  expectedInput       String
+  expectedOutput      String
+  successCriteria     String
+  retryPolicy         String
+  escalationPolicy    String
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+  sop                 BusinessSOP     @relation(fields: [sopId], references: [id], onDelete: Cascade)
+  team                AgentTeam       @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  assignedRoleAgent   RoleAgent       @relation(fields: [assignedRoleAgentId], references: [id], onDelete: Cascade)
+  validatorAgent      ValidatorAgent  @relation(fields: [validatorAgentId], references: [id], onDelete: Cascade)
+  stepRuns            StepRun[]
+}
+
+model ExecutionRun {
+  id                String            @id @default(cuid())
+  sopId             String
+  teamId            String
+  status            RunStatus         @default(queued)
+  inputPayload      String
+  outputPayload     String?
+  langfuseTraceId   String
+  startedAt         DateTime?
+  completedAt       DateTime?
+  totalTokens       Int               @default(0)
+  totalCost         Float             @default(0)
+  latencyMs         Int               @default(0)
+  outcomeScore      Float             @default(0)
+  createdAt         DateTime          @default(now())
+  sop               BusinessSOP       @relation(fields: [sopId], references: [id], onDelete: Cascade)
+  team              AgentTeam         @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  stepRuns          StepRun[]
+  humanReviewItems  HumanReviewItem[]
+  alerts            Alert[]
+}
+
+model StepRun {
+  id                    String             @id @default(cuid())
+  runId                 String
+  sopStepId             String
+  roleAgentId           String
+  validatorAgentId      String
+  status                StepRunStatus      @default(queued)
+  input                 String
+  output                String?
+  validationResult      String?
+  validationScore       Float              @default(0)
+  langfuseObservationId String
+  retryCount            Int                @default(0)
+  tokensUsed            Int                @default(0)
+  cost                  Float              @default(0)
+  latencyMs             Int                @default(0)
+  logs                  String
+  startedAt             DateTime?
+  completedAt           DateTime?
+  run                   ExecutionRun       @relation(fields: [runId], references: [id], onDelete: Cascade)
+  sopStep               SOPStep            @relation(fields: [sopStepId], references: [id], onDelete: Cascade)
+  roleAgent             RoleAgent          @relation(fields: [roleAgentId], references: [id], onDelete: Cascade)
+  validatorAgent        ValidatorAgent     @relation(fields: [validatorAgentId], references: [id], onDelete: Cascade)
+  humanReviewItems      HumanReviewItem[]
+}
+
+model AgentMetric {
+  id                 String    @id @default(cuid())
+  agentId            String
+  date               DateTime
+  runs               Int       @default(0)
+  successRate        Float     @default(0)
+  avgLatencyMs       Int       @default(0)
+  totalTokens        Int       @default(0)
+  totalCost          Float     @default(0)
+  validationPassRate Float     @default(0)
+  retryRate          Float     @default(0)
+  escalationRate     Float     @default(0)
+  humanReviewRate    Float     @default(0)
+  agent              RoleAgent @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@unique([agentId, date])
+}
+
+model HumanReviewItem {
+  id                String       @id @default(cuid())
+  runId             String
+  stepRunId         String
+  sopId             String
+  agentId           String
+  reason            String
+  status            ReviewStatus @default(open)
+  recommendedAction String
+  reviewer          String?
+  createdAt         DateTime     @default(now())
+  resolvedAt        DateTime?
+  run               ExecutionRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  stepRun           StepRun      @relation(fields: [stepRunId], references: [id], onDelete: Cascade)
+  sop               BusinessSOP  @relation(fields: [sopId], references: [id], onDelete: Cascade)
+  agent             RoleAgent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+}
+
+model Alert {
+  id          String        @id @default(cuid())
+  severity    AlertSeverity @default(info)
+  type        AlertType
+  title       String
+  description String
+  sopId       String?
+  agentId     String?
+  runId       String?
+  status      AlertStatus   @default(open)
+  createdAt   DateTime      @default(now())
+  resolvedAt  DateTime?
+  sop         BusinessSOP?  @relation(fields: [sopId], references: [id], onDelete: Cascade)
+  agent       RoleAgent?    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  run         ExecutionRun? @relation(fields: [runId], references: [id], onDelete: Cascade)
+}
+
+model Tenant {
+  id                      String                   @id @default(cuid())
+  name                    String
+  slug                    String                   @unique
+  industry                String
+  region                  String
+  plan                    TenantPlan               @default(growth)
+  status                  TenantStatus             @default(active)
+  monthlyConversationCap  Int                      @default(100000)
+  monthlyTokenBudget      Int                      @default(5000000)
+  monthlyCostBudget       Float                    @default(1000)
+  defaultLocale           String                   @default("en")
+  createdAt               DateTime                 @default(now())
+  updatedAt               DateTime                 @updatedAt
+  campaigns               Campaign[]
+  recommendations         CampaignRecommendation[]
+  campaignRuns            CampaignRun[]
+  campaignAgentEvents     CampaignAgentEvent[]
+}
+
+model Campaign {
+  id                    String              @id @default(cuid())
+  tenantId              String
+  name                  String
+  objective             CampaignObjective
+  status                CampaignStatus      @default(completed)
+  cohortName            String
+  templateName          String
+  sentAt                DateTime?
+  audienceSize          Int
+  delivered             Int                 @default(0)
+  opened                Int                 @default(0)
+  clicked               Int                 @default(0)
+  replied               Int                 @default(0)
+  conversions           Int                 @default(0)
+  revenue               Float               @default(0)
+  spend                 Float               @default(0)
+  optOuts               Int                 @default(0)
+  qualityRating         Float               @default(0)
+  notes                 String              @default("")
+  createdAt             DateTime            @default(now())
+  updatedAt             DateTime            @updatedAt
+  tenant                Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+}
+
+model CampaignRecommendation {
+  id                      String               @id @default(cuid())
+  tenantId                String
+  runId                   String?
+  status                  RecommendationStatus @default(recommended)
+  objective               CampaignObjective
+  recommendedCohort       String
+  cohortReason            String
+  audienceEstimate        Int
+  recommendedTemplate     String
+  templateBody            String
+  recommendedSendTime     DateTime
+  sendTimeReason          String
+  expectedRevenue         Float
+  expectedReplyRate       Float
+  expectedConversionRate  Float
+  riskLevel               String
+  validatorFeedback       String
+  operatingSummary        String
+  createdAt               DateTime             @default(now())
+  updatedAt               DateTime             @updatedAt
+  tenant                  Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  run                     CampaignRun?         @relation(fields: [runId], references: [id], onDelete: SetNull)
+}
+
+model CampaignRun {
+  id                   String               @id @default(cuid())
+  tenantId             String
+  status               CampaignRunStatus    @default(running)
+  objective            CampaignObjective
+  inputPayload         String
+  outputPayload        String?
+  langfuseTraceId      String
+  startedAt            DateTime             @default(now())
+  completedAt          DateTime?
+  totalInputTokens     Int                  @default(0)
+  totalOutputTokens    Int                  @default(0)
+  totalTokens          Int                  @default(0)
+  totalCost            Float                @default(0)
+  latencyMs            Int                  @default(0)
+  outcomeScore         Float                @default(0)
+  createdAt            DateTime             @default(now())
+  tenant               Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  agentEvents          CampaignAgentEvent[]
+  recommendations      CampaignRecommendation[]
+}
+
+model CampaignAgentEvent {
+  id                    String               @id @default(cuid())
+  tenantId              String
+  runId                 String
+  agentName             String
+  agentRole             CampaignAgentRole
+  runtime               CampaignAgentRuntime @default(llm_only)
+  provider              String               @default("google")
+  model                 String               @default("gemini-2.5-flash-lite")
+  promptVersion         String               @default("campaign-mvp-v1")
+  input                 String
+  output                String
+  validationScore       Float                @default(0)
+  status                String               @default("succeeded")
+  inputTokens           Int                  @default(0)
+  outputTokens          Int                  @default(0)
+  totalTokens           Int                  @default(0)
+  cost                  Float                @default(0)
+  latencyMs             Int                  @default(0)
+  langfuseObservationId String
+  createdAt             DateTime             @default(now())
+  tenant                Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  run                   CampaignRun          @relation(fields: [runId], references: [id], onDelete: Cascade)
+}
